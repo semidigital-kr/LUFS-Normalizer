@@ -21,9 +21,9 @@ git add .
 echo.
 set /p version_tag="Enter version tag (e.g., v0.0.2) and press ENTER: "
 
-:: Commit and Tag
+:: Commit and Tag (-f 옵션 추가: 기존 태그가 있으면 강제로 덮어씀)
 git commit -m "Release %version_tag%"
-git tag %version_tag%
+git tag -f %version_tag%
 
 echo.
 echo [INFO] Uploading to GitHub. Please wait...
