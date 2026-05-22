@@ -7,6 +7,7 @@ import tempfile
 import json
 import ctypes
 import webbrowser # Added to open web browser links
+import sys
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3
 
@@ -75,7 +76,21 @@ class LufsNormalizerApp:
         self.file_list = []
 
         # --- Load Saved LUFS Config ---
-        self.config_file = "config.json"
+        # Windows AppData 폴더를 활용하여 Program Files 권한 문제 완벽 해결
+        appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), "LUFS_Normalizer")
+        os.makedirs(appdata_dir, exist_ok=True)
+        self.config_file = os.path.join(appdata_dir, "config.json")
+        
+        # --- FFmpeg Executable Absolute Path Configuration ---
+        # 일반 권한 서브프로세스 제한을 해제하기 위해 실행 파일 기준의 100% 절대 경로로 지정
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(__file__)
+        self.ffmpeg_exe = os.path.join(base_dir, "ffmpeg.exe")
+        if not os.path.exists(self.ffmpeg_exe):
+            self.ffmpeg_exe = 'ffmpeg' # Fallback to global PATH if not in local folder
+        
         saved_lufs = "-14.0"
         if os.path.exists(self.config_file):
             try:
@@ -105,7 +120,7 @@ class LufsNormalizerApp:
         text_frame = tk.Frame(header_frame, bg=self.bg_color)
         text_frame.pack(side="left", anchor="w")
         tk.Label(text_frame, text="LUFS Normalizer by SEMIDIGITAL", font=self.font_title, bg=self.bg_color, fg=self.fg_color).pack(anchor="w")
-        tk.Label(text_frame, text="Version 0.0.2 (Build 20260518)", font=self.font_sub, bg=self.bg_color, fg=self.gray_text).pack(anchor="w", pady=(2, 0))
+        tk.Label(text_frame, text="Version 0.0.2 (Build 20260522)", font=self.font_sub, bg=self.bg_color, fg=self.gray_text).pack(anchor="w", pady=(2, 0))
 
         # Divider line
         tk.Frame(root, bg=self.element_bg, height=1).pack(fill="x", padx=20, pady=10)
@@ -234,7 +249,7 @@ class LufsNormalizerApp:
 
     def get_current_lufs(self, filepath):
         command = [
-            'ffmpeg', '-i', filepath,
+            self.ffmpeg_exe, '-i', filepath,
             '-vn', # Ignore album art for speed
             '-af', 'loudnorm=print_format=json',
             '-f', 'null', '-'
@@ -298,7 +313,7 @@ class LufsNormalizerApp:
         
         # 1. FFmpeg 1st Pass (정확한 LUFS 및 True Peak 측정)
         pass1_cmd = [
-            'ffmpeg', '-i', filepath,
+            self.ffmpeg_exe, '-i', filepath,
             '-vn', 
             '-af', 'loudnorm=print_format=json',
             '-f', 'null', '-'
@@ -340,7 +355,7 @@ class LufsNormalizerApp:
         
         # 2. FFmpeg 2nd Pass (다이나믹 스쿼싱을 100% 방지하기 위한 순수 volume 필터 적용)
         command = [
-            'ffmpeg', '-y', '-i', filepath,
+            self.ffmpeg_exe, '-y', '-i', filepath,
             '-af', f'volume={gain_db}dB'
         ]
         
@@ -376,11 +391,16 @@ class LufsNormalizerApp:
             
         try:
             target_lufs = float(self.lufs_entry.get())
-            with open(self.config_file, 'w') as f:
-                json.dump({"target_lufs": self.lufs_entry.get()}, f)
         except ValueError:
             messagebox.showerror("Error", "LUFS value must be a number. (e.g., -14)", parent=self.root)
             return
+
+        # 설정 파일 저장 과정에서 권한 에러(Admin 생성 흔적)가 나더라도 전체 오디오 프로세싱이 중단되는 현상을 완벽 차단
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump({"target_lufs": self.lufs_entry.get()}, f)
+        except Exception:
+            pass
 
         # FIX: parent=self.root 추가
         answer = messagebox.askyesno("Confirm", f"The volume of {len(self.file_list)} files in the list will be adjusted to {target_lufs} LUFS and overwritten.\n(Warning: Original files will be modified, please use test files!)\n\nDo you want to proceed?", parent=self.root)
